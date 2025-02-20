@@ -1,0 +1,200 @@
+---
+title: "Data Exploration & Visualization (City service requests made in Vancouver, British
+Columbia from 2022 to the present.)"
+output:
+  html_document:
+    df_print: paged
+  html_notebook: default
+  pdf_document: default
+---
+```{r}
+library(tidyverse)
+library(dplyr)
+vancouver_df <- read.csv('./vancouver_311_requests.csv', sep = ';')
+head(vancouver_df)
+```
+```{r}
+str(vancouver_df)
+```
+str() function shows structure of an object. From the result above we can see that, type of our dataset is data.frame which consists of 842862 rows and 13 columns. And also shows the type of each column.
+```{r}
+unique(vancouver_df$Local.area)
+```
+```{r}
+length(unique(vancouver_df$Local.area))
+```
+In our dataset 23 unique values of Local.area including empty value.
+```{r}
+sunset_df <- filter(vancouver_df, Local.area == 'Sunset')
+nrow(sunset_df)
+```
+Now I have 33036 records from my area Sunset.
+```{r}
+str(sunset_df)
+```
+The following columns have date-related information: Service.request.open.timestamp, Service.request.close.date, Last.modified.timestamp.
+Now R see them as character not date.
+```{r}
+sunset_df$Service.request.open.timestamp <- as.Date(sunset_df$Service.request.open.timestamp)
+sunset_df$Service.request.close.date <- as.Date(sunset_df$Service.request.close.date)
+sunset_df$Last.modified.timestamp <- as.Date(sunset_df$Last.modified.timestamp)
+
+str(sunset_df)
+```
+Now R sees these columns as Date.
+```{r}
+sunset_df <- sunset_df %>% mutate(duration = as.numeric(Service.request.close.date - Service.request.open.timestamp, units="days"))
+```
+To extract numeric value of difference between dates, I used as.numeric() function and specified units as days.
+```{r}
+sum(is.na(sunset_df))
+```
+In our dataset 41170 total NA values.
+```{r}
+colSums(is.na(sunset_df))
+```
+Here is the total # of NA values for each column. 
+The columns Latitude and Longitude each has 20062 missing values, probably Address column is also contain empty values. The service close date didn't recorded 523 times, which is affected duration column too.
+```{r}
+library(lubridate)
+
+birthday_reqs <- sunset_df %>% filter(month(Service.request.open.timestamp) == 11 & day(Service.request.open.timestamp) == 24)
+nrow(birthday_reqs)
+```
+My birthday is in November 24th, and by using functions from lubridate package, we see that in my birthday occurred 64 requests.
+```{r}
+birthday_reqs_channel <- birthday_reqs %>% group_by(Channel) %>% summarise(Count = n()) %>% arrange(desc(Count))
+birthday_reqs_channel
+```
+On this date the most of requests came from WEB, Phone channels.
+```{r}
+birthday_reqs_types <- birthday_reqs %>% group_by(Service.request.type) %>% summarise(Count = n()) %>% arrange(desc(Count))
+birthday_reqs_types
+```
+The top 5 requests inlcude cases related to Green bin (total 16), non-recyclables(total 6), business licence and abandoned vehicle.
+```{r}
+sunset_df %>% group_by(Year = year(Service.request.open.timestamp)) %>% summarise(Count = n())
+```
+The dataset only contains city service requests going through January of 2025, so the 2025 annual total is not really comparable to the numbers from other years.
+```{r}
+sunset_df %>% group_by(Channel) %>% summarise(avg = mean(duration, na.rm = TRUE)) %>% arrange(desc(avg))
+```
+For the channels like E-mail, Chat, Mobile App the average duration to complete service request is more than 10 days. On the other hand, by using Mail channel they spent 3 days on average. Perhaps, since nowadays a lot of requests came from digital/web apps, and the older requests can left at the bottom of the queue which can lead to delays to finish them. Also, different types of requests can be sent through each type of channel, more complicated use E-mail, and small cases use Mail. Or some other factor can affect.
+```{r}
+open_reqs <- sunset_df %>% filter(Status == "Open")
+nrow(open_reqs)
+open_reqs %>% group_by(Month = month(Service.request.open.timestamp)) %>% summarise(Count = n())
+```
+272 out of 523 total open requests are in January only. The dataset was retrieved in January 2025, and most of the yet-unresolved cases in it are recent ones -- that's what explains the January bump
+```{r}
+names(sunset_df)
+sunset_df <- sunset_df %>% rename(Service.request.open.date = Service.request.open.timestamp)
+
+names(sunset_df)
+```
+I renamed the column Service.request.open.timestamp to Service.request.open.date, because now it contains only dates without time.
+```{r}
+sunset_df$Address <- NULL
+
+names(sunset_df)
+```
+Now our dataset has 13 columns.
+```{r}
+data1 <- sunset_df %>% 
+  group_by(DayOfWeek = wday(Service.request.open.date, label = TRUE)) %>% 
+  summarise(Count = n()) %>% 
+  mutate(DayOfWeek = factor(DayOfWeek, levels = c("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"), ordered = TRUE)) %>%
+  arrange(DayOfWeek)
+
+library(ggplot2)
+library(ggthemes)
+
+ggplot(data1, aes(x=DayOfWeek, y=Count)) +
+  geom_bar(stat = "identity", fill="thistle", color="black") +
+  labs(title = "City Service requests by Day of Week",
+       x = "Day of Week",
+       y = "Number of Requests") +
+  theme_clean()
+```
+The bar chart displays how many requests were made each day of week.Weekends have only about half the volume of requests, and the middle of the week is when the highest number of requests are occur. Maybe in the weekdays people tend to have more time or prefer to report rather than on weekends.
+```{r}
+top7_req_types <- sunset_df %>% group_by(Service.request.type) %>% summarise(Count = n()) %>% arrange(desc(Count)) %>% slice_head(n=7)
+top7_req_types$Service.request.type
+
+sunset_df_top7 <- sunset_df %>% filter(Service.request.type %in% top7_req_types$Service.request.type)
+nrow(sunset_df_top7)
+```
+Now there are only 16088 records with top 7 service request types.
+```{r}
+data2 <- sunset_df_top7 %>% group_by(DayOfWeek = wday(Service.request.open.date, label = TRUE), Department) %>% 
+  summarise(Count = n(), .groups = "drop") %>% 
+  mutate(DayOfWeek = factor(DayOfWeek, levels = c("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"), ordered = TRUE)) %>%
+  arrange(DayOfWeek)
+
+ggplot(data2, aes(x=DayOfWeek, y=Count, fill = Department)) + 
+  geom_bar(stat = "identity", position = "dodge") +
+  scale_fill_manual(values = c("#E69F00", "#56B4E9", "#009E73"))
+  labs(title = "City Service requests by Day of Week and Department",
+       x = "Day of Week",
+       y = "Number of Requests") +
+  theme_foundation()
+```
+The main part of service requests from "ENG-Sanitation Services" no matter which day is it. The "PR-Urban Forestry" requests stays the same during the days of week, while "DBL-Services Centre" requests drops significantly on weekends. What if DBL Services Centre offices are closed on weekends, so citizens know this and wait until the week to make the reports? But if Urban Forestry is set up differently, that might explain why it doesn't show such a big change. Or maybe Urban Forestry requests can be depend on weather conditions, and occur not so often like Sanitation services. 
+```{r}
+data3 <- sunset_df_top7 %>% group_by(Month = month(Service.request.open.date, label = TRUE), Service.request.type) %>% 
+  summarise(Count = n(), .groups = "drop")
+
+ggplot(data3, aes(x=Month, y=Count, fill = Service.request.type)) + 
+  geom_bar(stat = "identity") +
+  labs(title = "City Service requests by Month and Service Request Type",
+       x = "Month",
+       y = "Number of Requests") +
+  theme_calc()
+```
+January has highest number of requests, followed by November and December. Missed Green Bin Pickup Case occurred in these 3 months more than other months. In January post-holiday waste can put extra pressure to collection system. Also, November and December which are holiday season can lead to increase of waste too. November is often peak time for leaf fall, it can also impact collection system. 
+It's interesting that Building and Development inquires spike in January, and stays high during the year. January is like a month of new beginnings, when people tend to start new projects. Maybe it can be one of the reasons of large number of requests.
+```{r}
+ggplot(sunset_df_top7, aes(x=duration)) + 
+  geom_histogram(binwidth = 50, fill = "skyblue", color = "black", boundary = 0) +
+  labs(title = "Distribution of Service Request Duration",
+       x = "Duration (in days)",
+       y = "Number of Requests"
+       ) +
+  theme_bw()
+```
+The distribution is left-skewed. It's interesting that for some requests to be closed took around 800 days, maybe it's result of some technical issues, or these cases delayed because of legal issues. And in most cases to complete request took between 0 to 50 days.
+By setting binwidth = 50, I say that each bin represents 50 days.
+```{r}
+ggplot(sunset_df_top7, aes(x=duration)) + 
+  geom_histogram(binwidth = 30, fill = "skyblue", color = "black", boundary = 0) +
+  facet_wrap(~Service.request.type)
+  labs(title = "Distribution of Service Request Duration",
+       x = "Duration (in days)",
+       y = "Number of Requests"
+       ) +
+  theme_bw()
+```
+Most of the city requests have a same pattern, which can represent that city requests processes in a quick turnaround time. In some cases it can take longer than 30 days, maybe because of legal issues which can occur for the City and Trees Maintenance case (permits to make changes from multiple departments)
+```{r}
+ggplot(sunset_df_top7, aes(x=Channel, fill = Service.request.type)) +
+  geom_bar(position = "fill") +
+  labs(title = "Distribution of Service Request Type by Channel",
+       y = "Proportion of requests",
+       fill = "Service Request Type")
+```
+This plot shows the distribution of service request types across channels. Interesting, that Abandoned Non-Recyclables mostly reported via mobile app, while City and Park Maintenance dominate in Social Media and E-mail. Also, Building and Development Inquiry mostly reported via WEB. Different requests seems like have preferred channels. For instance, garbage and green bin requests prefer chat or phone, that do not require any additional resources like images. For the City and Park Maintenance social media is popular, maybe because people prefer post about their awareness of city to public discussion.
+```{r}
+library(leaflet)
+
+sunset_df_map <- sunset_df %>% filter(!is.na(Latitude) & !is.na(Longitude))
+
+leaflet(data = sunset_df_map) %>%
+  addTiles() %>%
+  addCircles(~Longitude, ~Latitude)
+```
+```{r}
+leaflet(data = sunset_df_map) %>%
+  addProviderTiles("Esri.WorldImagery") %>% 
+  addCircles(~Longitude, ~Latitude, radius = 5, color = "gold", popup = ~Department)
+```
+Created map with Esri World Imagery tiles, and added popup text which will display department name for each service request.
