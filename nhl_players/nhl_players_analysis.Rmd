@@ -1,0 +1,218 @@
+---
+title: 'Forecasting the salaries of hockey players'
+output:
+  html_document:
+    df_print: paged
+---
+```{r}
+library(tidyverse)
+library(dplyr)
+
+main_data <- read.csv('nhl_players.csv')
+glimpse(main_data)
+```
+By looking at dataset, we can see that all variables that are represented by number are numeric. Even the salary column is represented as character because of the dollar sign, it is also numeric. And all other remaining variables are categorical.
+Categorical: name, Team_y, Position_y, Handed
+Numeric: GP, G, A, P, Sh, Sh_perc, Salary, PIM, Giveaways, Takeaways, Hits, Hits.Taken, blocked_shots, PlusMinus
+
+Discrete numeric: GP, G, A, P, Sh, Giveaways, Takeaways, Hits, Hits.Taken, blocked_shots, PlusMinus
+Continuous numeric: Sh_perc, Salary, PIM
+```{r}
+colSums(is.na(main_data))
+```
+Our dataset doesn't have any NA values.
+```{r}
+main_data <- main_data %>% rename(Team = Team_y, Position = Position_y)
+names(main_data)
+```
+I renamed the columns 'Team_y', 'Position_y' by removing last two characters, since they are not useful at all.
+```{r}
+main_data$name[duplicated(main_data$name)]
+
+clean_data <- main_data %>% distinct(name, .keep_all = TRUE)
+nrow(clean_data)
+```
+There are 7 duplicated name values found, after removing them we had 561 values in dataset.
+```{r}
+clean_data$SALARY <- as.numeric(gsub("[$,]", "", clean_data$SALARY))
+str(clean_data)
+```
+After clearing up the Salary variable from specific characters, I converted it to numeric type.
+```{r}
+set.seed(79)
+nhl.index <- sample(c(1:nrow(clean_data)), nrow(clean_data)*0.6)
+nhl_train.df <- clean_data[nhl.index, ]
+nhl_valid.df <- clean_data[-nhl.index, ]
+
+# View(nhl_train.df)
+# View(nhl_valid.df)
+```
+Data partitioning helps prevent biased decisions by ensuring that insights from training dataset also applicable to validation set. If we analyze first, we may unintentionally use insights that we think are applicable for every scenario while it can lead to overfitting. By partitioning first, we can ensure that our tests on training and validation sets provide independent performance measures.
+```{r}
+library(ggplot2)
+
+options(scipen=5)
+ggplot(nhl_train.df, aes(x=P, y=SALARY)) + 
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(title = "Relationship between player's total points and salary",
+       x = "Total Points",
+       y = "Salary")
+```
+
+From the plot above we can see that most of players with small salary also have small number of points, and by increase of total points salary also going up. However despite the total points, it seems like other parameters also affect the salary. Because in some cases even the player has not so high points, the salary is extremely large number. For instance, let's look at X=60, where we can see that there is one player with very high salary around 16000000, while majority's salary below 10 million.
+Maybe other factors such as budget of the team, position type, total number of games played have more impact to the salary. A player with more games may be valued higher due to greater experience, and their impact on team performance could also be considered in the evaluation.
+```{r}
+cor(nhl_train.df$SALARY, nhl_train.df$P)
+cor.test(nhl_train.df$SALARY, nhl_train.df$P)
+```
+Correlation is the linear relationship between two continuous variables. Pearson's correlation measures strength of that relationship.
+Correlation value here is 0.67, which is not strong(<0.7) but around that value. 
+High t-value and very low p-value suggests correlation is significant, meaning we can reject null hypothesis that there is no correlation between Price and Salary.
+```{r}
+model <- lm(SALARY ~ P, data = nhl_train.df)
+summary(model)
+```
+```{r}
+max(residuals(model))
+max_res_index <- which.max(residuals(model))
+actual_data_max_res <- nhl_train.df[max_res_index, ]
+actual_data_max_res$SALARY
+
+predict(model, newdata = actual_data_max_res)
+```
+For highest residual value in the model:
+Actual salary:14,500,000
+Predicted salary:5,290,369
+Residual is difference between actual and predicted values, which is 9,209,631 for this player.
+```{r}
+min(residuals(model))
+min_res_index <- which.min(residuals(model))
+actual_data_min_res <- nhl_train.df[min_res_index, ]
+actual_data_min_res$SALARY
+
+predict(model, newdata = actual_data_min_res)
+```
+For lowest residual value in the model:
+Actual Salary: 1,400,000
+Predicted Salary: 6,086,187
+From this record we can determine which value was subtracted from another, so residual = actual - predicted = 1400000 - 6086187 = -4686187
+
+Besides Points the number of games played, shot percentage, penalties in minutes can also impact salary. More games played more reliable player looks like, higher shot percentage shows higher efficiency of scoring, more penalties can negatively impact team. The player's performance, and defensive skills could have more impact. Even if a player just joined the team, his strong impact on team performance and outstanding gameplay can boost their popularity. The increased demand may attract interest from other team managers which definitely influence the player's value.
+```{r}
+summary(model)
+```
+The regression equation is 1311280 + 99477*P
+From the equation, we see that even if the player doesn't have any points he will start with 1,311,280 salary. And each earned point will increase that minimum salary by 99,477.
+Let's assume P=10 --> Salary=2,306,050.
+```{r}
+library(forecast)
+
+train <- predict(model, nhl_train.df)
+valid <- predict(model, nhl_valid.df)
+
+# Training Set
+accuracy(train, nhl_train.df$SALARY)
+# Validation Set
+accuracy(valid, nhl_valid.df$SALARY)
+```
+Since we are using our model to predict value, we need to be sure that we are not overfitting our data. Overfitting would make the model ineffective, as it would perform well on training data but fail to new, unseen data.
+The values above show overall measures of predictive accuracy. RMSE value for validation data (2126314) is smaller than for the training data, which is 2213352. However both values are close, which is indicates that model is not overfitting. Mean absolute error for holdout set (1659595) also smaller than the value for training set (1688599). Thus, we actually see less error on validation data.  
+```{r}
+sd(nhl_train.df$SALARY)
+2213352/sd(nhl_train.df$SALARY)
+2126314/sd(nhl_train.df$SALARY)
+```
+Let's compare RMSE to the standard deviation of training set. Both values are very close, and relatively accurate since SD tells us how much variable's value differ from its mean value. If the RMSE higher than SD, model's predictions are not much better than using the mean value of the dataset as a predictor.
+```{r}
+nhl_train_numbers <- nhl_train.df %>% select(-name, -Team, -Position, -HANDED)
+cor_table <- nhl_train_numbers %>% cor()
+# cor_table
+
+library(gplots)
+heatmap.2(cor_table, Rowv=FALSE, Colv=FALSE, dendrogram="none", trace = "none", cellnote=round(cor_table,2), notecol = "black", density.info = "none")
+```
+
+From heatmap we can see correlation value between variables in our dataset. The Goal, Assists number, total shots and number of takeaways and points are strongly correlated between each other (>0.7). The assists number, shots and giveaways number also strongly correlated. While shot percentage negatively impacts blocked shots number, PlusMinus have very small connection with all remaining variables. 
+Here, we can observe multicolinearity since Points is the sum of Goals and Assists, making them dependent variables. Similarly, Shot Percentage is derived by dividing Shots to Goals. Since Shots represent the number of times a player attempts to score, and Points are the sum of goals and assists, these numbers are interconnected. So Shots can cause Goals, and when a player scores a Goal, an Assist should be credited to the player, the sum of these two numbers are represented as Points.
+Since we can't use dependent variables as inputs in linear model, let's keep Points as it holds more value than total shots, as a player may take many shots without successfully scoring a goal. Also it is more correlated to output variable. 
+```{r}
+nhl_train_numbers <- nhl_train_numbers %>% select(-G, -A, -Sh, -Sh_perc)
+cor_table_2 <-nhl_train_numbers %>% cor()
+heatmap.2(cor_table_2, Rowv=FALSE, Colv=FALSE, dendrogram="none", trace = "none", cellnote=round(cor_table_2,2), notecol = "black", density.info = "none")
+```
+
+In new heatmap, we can see that Takeaways and Points are highly correlated (=0.8). Maybe these numbers are not dependent, but when player took a puck from an opposite it can lead to goal. Let's remove Takeaways from our model. The player with high giveaways have a tendency to lose a puck more often, which can decrease team's performance. Which also can affect Points earned. Also let's remove Hits.Taken since its highly correlated with Games Played (=0.71). More games played more possibility to make a contact with the player who has the puck.
+And let's build model with remaining variables, and use backward elimination.
+```{r}
+nhl_train_numbers <- nhl_train_numbers %>% select(-Takeaways, -Giveaways, -Hits.Taken)
+nhl_train_numbers %>% cor()
+```
+When categorical variables used as predictors, we convert them into dummy variables. A variable with n categories will have n-1 dummy variables, and remaining one value will be as reference level. This helps in analyzing the impact of categorical predictors on the dependent variable.
+```{r}
+nhl_train.df <- nhl_train.df %>% select(-G, -A, -Sh, -Sh_perc, -Takeaways, -Giveaways, -Hits.Taken)
+nhl_train.df <- nhl_train.df %>% select(-name)
+
+model1 <- step(lm(SALARY~., data = nhl_train.df), direction = "backward")
+```
+```{r}
+summary(model1)
+```
+Here is the summary of our model. I didn't include name of the player as an input.
+From the model we can see that Games Played, Hits, PlusMinus have negative impact on salary. Maybe because of the demand to new players, we got negative coef to GP.
+```{r}
+mean_salary <- mean(nhl_train.df$SALARY)
+
+sst <- sum((nhl_train.df$SALARY - mean_salary)^2)
+sst
+
+ssr <- sum((model1$fitted.values-mean_salary)^2)
+ssr
+
+ssr/sst
+```
+The final value is exactly same as r-squared value of the model.
+```{r}
+library(visualize)
+visualize.t(stat=c(-2.384, 2.384), df=330, section="bounded")
+```
+
+t-value for GP is -2.384.
+After plotting distribution for that t-value, we can see that 98.2% of the curve is shaded. A bigger t-value occupy more space, and p-value goes lower.
+The remaining 1.8% (p-value) is the probability of obtaining a t-statistic beyond [-2.384, 2.384].
+```{r}
+summary(model1)
+```
+F-statistic: 66.31
+F-statistic tests overall significance of the model. The better the fit, the higher the F-score will be.
+```{r}
+# F-statistic calculation
+k <- 5
+n <- 336
+sse <- sum(model1$residuals^2)
+
+numerator <- ssr/k
+denominator <- sse / (n-k-1)
+numerator / denominator
+```
+```{r}
+predict(model1, newdata = data.frame(GP=82, P=60, Hits=150, blocked_shots=100, PlusMinus=20))
+```
+So, by using the predict() function with random data the predicted salary is $7,211,812.
+It was found by using Regression Equation: 1587099-24975*GP+118004*P-5146*Hits+21018*blocked_shots-36873*PlusMinus
+```{r}
+train1 <- predict(model1, nhl_train.df)
+valid1 <- predict(model1, nhl_valid.df)
+
+# Training Set
+accuracy(train1, nhl_train.df$SALARY)
+# Validation Set
+accuracy(valid1, nhl_valid.df$SALARY)
+```
+We got overall measures of predictive accuracy, now for MLR model. RMSE value for validation set (1975654) is also smaller than training set (2105508). Same with MAE, for training set is 1592227, and for validation set is 1532076. Small difference between these numbers can suggest that our model is not overfitting.
+```{r}
+2105508/sd(nhl_train.df$SALARY)
+1975654/sd(nhl_train.df$SALARY)
+```
+Compared to SLR, we got smaller coefficients by comparing RMSE to standard deviation of training set. So, using multiple inputs to predict salary is more efficient than using only points.
+Our model explains 50% of the variance in salary, which suggests there are other factors that can impact salary of the player. As I mentioned earlier, the reputation of the player, and the budget of the team can play major role. These variables not included in our model.
