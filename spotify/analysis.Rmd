@@ -1,23 +1,174 @@
 ---
-title: "R Notebook"
+title: "K-Nearest Neighbors: You Like This Song...But Will George Like It?"
 output: html_notebook
 ---
 
-## K-Nearest Neighbors
 ```{r}
 library(tidyverse)
 library(dplyr)
 
 spotify_2023 <- read.csv('spotify-2023.csv')
-View(spotify_2023)
+# View(spotify_2023)
 str(spotify_2023)
 
 spotify_2023 %>% filter(track_name == 'Money Trees')
 ```
+1.a.My song is Money Trees - Kendrick Lamar, Jay Rock.
+b.I'm a big fan of Kendrick's music, and especially songs from this album is one of the favorites of mine.
+c.danceability: 74
+  energy: 53
+  speechiness: 10
+  acousticness: 7
+  liveness: 21
+  valence: 37
+  BPM: 144
+```{r}
+my_song <- spotify_2023 %>% filter(track_name == 'Money Trees')
+my_song
+```
+```{r}
+spotify <- read.csv('spotify.csv')
+View(spotify)
 
-Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Cmd+Option+I*.
+str(spotify)
 
-When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Cmd+Shift+K* to preview the HTML file). 
+spotify$target <- factor(spotify$target)
+levels(spotify$target)
 
-The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
+table(spotify$target)
+```
+3.a.Target variable is of type int, then I converted it to categorical variable (factor). 
+b.The target factor variable has 2 categories: 0 or 1. By counting total number of rows for each category, we get that George has 1020 favorite, and 997 disliked songs. Which is interesting, that number of disliked ones pretty close to liked. The music taste of George can be diverse, and Spotify's recommendation system might be actively adjusting to his preferences. Actually, when you dislike one song in Spotify, the system tries to not suggest you similar songs, and try other different options. To state this opinion constantly we need to explore more about song preferences of George. Furthermore, there are could be temporal patterns in George's preferences, for instance he prefer certain types of songs at different times of day, month or year.
+```{r}
+colSums(is.na(spotify))
+```
+4. There is no NA values in this dataset.
+```{r}
+summary(spotify_2023)
 
+spotify_2023$danceability_. <- spotify_2023$danceability_./100
+spotify_2023$energy_. <- spotify_2023$energy_./100
+spotify_2023$speechiness_. <- spotify_2023$speechiness_./100
+spotify_2023$valence_. <- spotify_2023$valence_./100
+spotify_2023$acousticness_. <- spotify_2023$acousticness_./100
+spotify_2023$liveness_. <- spotify_2023$liveness_./100
+
+spotify_2023 <- spotify_2023 %>% rename(danceability=danceability_., energy=energy_., speechiness=speechiness_., valence=valence_., acousticness=acousticness_., liveness=liveness_., tempo=bpm)
+
+my_song <- spotify_2023 %>% filter(track_name == 'Money Trees')
+
+names(spotify_2023)
+```
+5.a. I converted the values in spotify_23 to decimal format.
+b. Also, applied the same changes to my_song by recreating it.
+```{r}
+set.seed(79)
+spotify.index <- sample(c(1:nrow(spotify)), nrow(spotify)*0.6)
+spotify_train.df <- spotify[spotify.index, ]
+spotify_valid.df <- spotify[-spotify.index, ]
+```
+
+```{r}
+liked <- spotify_train.df %>% filter(target==1)
+disliked <- spotify_train.df %>% filter(target==0)
+
+t.test(liked$danceability, disliked$danceability)
+t.test(liked$tempo, disliked$tempo)
+t.test(liked$energy, disliked$energy)
+t.test(liked$speechiness, disliked$speechiness)
+t.test(liked$valence, disliked$valence)
+t.test(liked$acousticness, disliked$acousticness)
+t.test(liked$liveness, disliked$liveness)
+```
+7.b. Based on the results above, here is the list of variables that show significant difference: Danceability(p_value = 3.965e-09), speechiness(p-value = 3.461e-09), valence(p-value = 0.0005895), acousticness(p-value = 5.028e-05). Very low p-value suggests that, there is significant difference on this values between liked and disliked songs, making them main parameters to identify George's preferences in music.
+Other remaining variables have p-value more than typical threshold 0.05: tempo(p-value = 0.7416), energy(p-value = 0.3646), liveness(p-value = 0.1324).
+```{r}
+spotify_train.df <- spotify_train.df %>% select(-tempo, -energy, -liveness)
+```
+7.c. k-nn method draws information from similarities between the variables by measuring distance between records. Variables with similar values across different outcome classes cannot provide useful information for distinguishing between groups. Including such variables can lead to overfitting, where the model performs well on training data but fails to generalize to new data. These insignificant variables affect the distance calculation, making it harder to distinguish between groups.
+```{r}
+head(spotify_train.df)
+spotify_train.df[, c("acousticness", "danceability", "speechiness", "valence")]
+```
+```{r}
+library(caret)
+
+spotify_train_norm.df <- spotify_train.df
+spotify_valid_norm.df <- spotify_valid.df
+spotify_norm.df <- spotify
+my_song_norm <- my_song
+
+
+norm_values <- preProcess(
+  spotify_train.df[, c("acousticness", "danceability", "speechiness", "valence")], 
+  method = c("center", "scale"))
+
+spotify_train_norm.df[, c("acousticness", "danceability", "speechiness", "valence")] <- 
+  predict(norm_values, spotify_train.df[, c("acousticness", "danceability", "speechiness", "valence")])
+View(spotify_train_norm.df)
+
+spotify_valid_norm.df[, c("acousticness", "danceability", "speechiness", "valence")] <- 
+  predict(norm_values, spotify_valid.df[, c("acousticness", "danceability", "speechiness", "valence")])
+View(spotify_valid_norm.df)
+
+spotify_norm.df[, c("acousticness", "danceability", "speechiness", "valence")] <- 
+  predict(norm_values, spotify[, c("acousticness", "danceability", "speechiness", "valence")])
+View(spotify_norm.df)
+
+my_song_norm[, c("acousticness", "danceability", "speechiness", "valence")] <- 
+  predict(norm_values, my_song[, c("acousticness", "danceability", "speechiness", "valence")])
+View(my_song_norm)
+```
+8.In this step we are normalizing only those columns that will be used in knn model building.
+```{r}
+library(FNN)
+# knn is all about numeric data, classification using numeric values
+nn <- knn( train = spotify_train_norm.df[, c("acousticness", "danceability", "speechiness", "valence")],
+           test = my_song_norm[, c("acousticness", "danceability", "speechiness", "valence")],
+           cl = spotify_train_norm.df[,c("target")],##what we are classifying: like or dislike
+           k=7)
+nn
+nn_indexes <- row.names(spotify_train.df)[attr(nn, "nn.index")]
+spotify_train.df[nn_indexes, ] %>% select(song_title, artist, target, acousticness, danceability, speechiness, valence)
+```
+9. By running knn model as a result get "1", which indicates that George will like my song. And by listing 7 nearest neighbors, I see that my song is also in this list and George already marked it as favorite. Within this songs, George marked only one song as disliked, which highlights not all similar songs are guaranteed to be liked. This disliked song has high valence value compared to others, but there is no difference in other variables. By running knn classification we get 7 nearest records with low distance value from our selected song. So if we just use numbers these songs look very similar to each other. But they are not. And the diversity of artists suggests George's musical preferences are varied.
+```{r}
+accuracy.df <- data.frame(k = seq(1,14,1), accuracy = rep(0,14))
+
+for(i in 1:14) {
+  knn.pred <- knn( train = spotify_train_norm.df[, c("acousticness", "danceability", "speechiness", "valence")],
+           test = spotify_valid_norm.df[, c("acousticness", "danceability", "speechiness", "valence")],
+           cl = spotify_train_norm.df[,c("target")],
+           k=i)
+  
+  accuracy.df[i, 2] <- confusionMatrix(knn.pred, spotify_valid_norm.df[ ,c("target")])$overall['Accuracy']
+}
+
+accuracy.df[order(-accuracy.df$accuracy), ]
+```
+10. From the list above we can see accuracy for different k values between 1 and 14. We can see that the difference in accuracy between values is very small. k=14 has highest accuracy value 0.6183395, also k=5 provides very similar number 0.6022305.
+```{r}
+library(ggplot2)
+
+ggplot(accuracy.df, aes(x=k, y=accuracy)) + 
+  geom_point() +
+  geom_line() +
+  labs(title = "Scatterplot of k values vs Accuracy",
+       x = "k values",
+       y = "Accuracy") +
+  scale_x_continuous(breaks = seq(min(accuracy.df$k), max(accuracy.df$k), by = 3))
+```
+11. The graph clearly illustrates the differences in accuracy across various k-values. k = 10 has about 61% accuracy, similar to k = 12 and k = 13. Since they give the same result, k = 10 is a better choice to reduce noise. Additionally, the previously used k = 7 had one of the lowest accuracy scores at 59%. While k = 14 had the highest accuracy at 62%, k = 10 appears to be a more balanced choice. Selecting 10 nearest neighbors should provide a more reliable classification of my song.
+```{r}
+nn_10 <- knn( train = spotify_train_norm.df[, c("acousticness", "danceability", "speechiness", "valence")],
+           test = my_song_norm[, c("acousticness", "danceability", "speechiness", "valence")],
+           cl = spotify_train_norm.df[,c("target")],##what we are classifying: like or dislike
+           k=10)
+nn_10
+nn_indexes_10 <- row.names(spotify_train.df)[attr(nn_10, "nn.index")]
+spotify_train.df[nn_indexes_10, ] %>% select(song_title, artist, target, acousticness, danceability, speechiness, valence)
+```
+12. I chose k=10 with moderate accuracy value. The output of model didn't change, it indicates George will like my song. But for now I got 10 nearest neighbors, and from this new list George disliked 3 songs. 
+All these songs have high value of danceability around 70%, low speechiness and acousticness. All 3 disliked songs as for k=7, have higher value of valence compared to others. Higher valence indicates more positive, cheerful, or euphoric songs. It seems that George might prefer songs with lower valence, which are less positive, more neutral in mood or moodier over cheerful ones. Disliked songs have relatively low acousticness, this suggest that George prefer songs with slightly more acoustic elements. The danceability is quite similar for both groups, which implies this factor is not strong in determining preferences. The disliked songs have relatively low speechiness, and some liked songs have higher speechiness ('Pacifier' has 0.1240) indicating George prefer songs with more spoken lyrics or rap. 
+
+13. I think main limitation here is that we are relying on numerical variables to predict whether someone will like this song or not. There are can be other factors such as good memories or associations with a song which can make them favorite. Also lyrics play main role in connecting with listeners on an emotional level. For instance, I tend to prefer songs with meaningful lyrics, while rap elements often give me an energy boost. Additionally, music preferences can vary based on context—what I listen to at the gym or while walking differs from what I play in the evening when I can't sleep.
