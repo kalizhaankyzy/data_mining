@@ -1,0 +1,235 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+cc <- read.csv('consumer_complaints.csv')
+# View(cc)
+glimpse(cc)
+```
+2. Numeric: Resolution.time.in.days, Year
+Categorical: X.ID
+```{r}
+str(cc$Consumer.disputed.)
+
+cc$Consumer.disputed. <- factor(cc$Consumer.disputed.)
+levels(cc$Consumer.disputed.)
+
+table(cc$Consumer.disputed.)
+
+cc %>% group_by(Consumer.disputed.) %>% 
+  summarise(Count = n()/14000)
+```
+3.a. Consumer.disputed. variable is of type chr, then I converted it to factor. 
+b. Now it has 2 levels: Yes or No. The data is imbalanced, out of 14,000 complaints only 3138 (22.4%) disputed.
+```{r}
+names(cc)
+cc <- cc %>% rename(Resolution.time.in.days = Resolution.time.in.days., 
+              Timely.response=Timely.response.,
+              Consumer.disputed=Consumer.disputed.,
+              Quarter = QTR..US.FLY.)
+
+```
+4. I removed dots from variables that had them at the end, and renamed QTR..US.FLY. to Quarter.
+```{r}
+sapply(cc, function(x) length(unique(x)))
+```
+5. After examining number of unique values in each column, we observe that a few columns contain more than 100 distinct values. Specifically, there are 14,000 unique ID records, 1,050 companies, and over 1,300 date values.
+```{r}
+cc <- cc %>% select(-X.ID, -Company, -Date.received, -Date.resolved, -Date.received.1, -Date.resolved.1)
+
+str(cc)
+```
+```{r}
+summary(cc)
+table(cc$State)
+
+cc <- cc %>% select(-state.name) %>% 
+  filter(Resolution.time.in.days>=0)
+
+str(cc)
+```
+6. a.Examining the results of the summary() function, we notice an impossible negative number for the resolution date. Additionally, there are two overlapping columns: State and State_name.
+b.Before that, when counting unique values by column, we observed that the State column had 60 unique values, while the State_name column had 52. Upon examining the values, it appears that the State column includes more detailed information, possibly encompassing territories and military postal codes.
+We can also keep Year, Resolution.time.in.days, and Quarter, which are related to the removed columns date_received, and date_resolved.
+```{r}
+cc <- cc %>% 
+  mutate(Year = cut(Year,
+                    breaks = c(2012, 2014, 2016),
+                    labels = c("Earlier period", "Later period"),
+                    right = TRUE))
+
+str(cc)
+
+table(cc$Resolution.time.in.days)
+
+non_zero_values <- cc$Resolution.time.in.days[cc$Resolution.time.in.days > 0]
+breaks <- quantile(non_zero_values, probs = seq(0, 1, length.out = 3))
+
+breaks <- c(0, breaks)
+
+cc$Resolution.time.in.days <- cut(cc$Resolution.time.in.days, breaks = breaks, labels = c("low", "medium", "high"), include.lowest = TRUE)
+
+
+table(cc$Resolution.time.in.days)
+```
+7. a.The Year column contains four unique values: 2013, 2014, 2015, and 2016. For binning, we can group them into two categories: 'Earlier period' for 2013 and 2014, and 'Later period' for 2015 and 2016.
+b. The Resolution_time variable contains a significant number of zeros (8,316) along with other values. This imbalance caused issues when using the equal frequency method for binning. To address this, I first filtered out the non-zero values to determine the breaks within the data. Then, I added zero to this group. As a result, we have three groups: low, medium, and high.
+```{r}
+length(unique(cc$Product))
+top_6_Product <- cc %>% 
+  count(Product, sort = TRUE) %>% 
+  slice(1:6) %>% 
+  select(Product)
+
+length(unique(cc$Issue))
+top_7_Issue <- cc %>% 
+  count(Issue, sort = TRUE) %>% 
+  slice(1:7) %>% 
+  select(Issue)
+
+length(unique(cc$State))
+top_10_State <- cc %>% 
+  count(State, sort = TRUE) %>% 
+  slice(1:10) %>% 
+  select(State)
+
+cc <- cc %>% filter(Product %in% top_6_Product$Product & 
+                Issue %in% top_7_Issue$Issue &
+                State %in% top_10_State$State)
+
+cc <- cc %>% 
+  mutate(Issue = case_when(
+    Issue == "Account opening, closing, or management" ~ "Account Management",
+    Issue == "Application, originator, mortgage broker" ~ "Mortgage Application",
+    Issue == "Communication tactics" ~ "Communication",
+    Issue == "Credit reporting company's investigation" ~ "Credit Investigation",
+    Issue == "Deposits and withdrawals" ~ "Transactions",
+    Issue == "Loan modification,collection,foreclosure" ~ "Loan Modification",
+    Issue == "Loan servicing, payments, escrow account" ~ "Loan Servicing",
+    TRUE ~ Issue
+  ))
+
+nrow(cc)
+```
+8. a. The Company variable was nearly removed from the dataset in stage 5.
+b. The Product column has 12 unique values, but we will use only the 6 most common ones.
+c. The Issue column contains 81 unique values, and we will use only the 7 most common ones. Also changed these 7 values to the shorter names.
+d. The State column has 60 unique values, and we will use the 10 most common ones.
+e. After reducing the unique levels, the dataset now contains 4110 rows.
+```{r}
+str(cc)
+cc$Product <- as.factor(cc$Product)
+cc$Issue <- as.factor(cc$Issue)
+cc$State <- as.factor(cc$State)
+cc$Submitted.via <- as.factor(cc$Submitted.via)
+cc$Timely.response <- as.factor(cc$Timely.response)
+cc$Year <- as.factor(cc$Year)
+cc$Quarter <- as.factor(cc$Quarter)
+
+set.seed(79)
+cc.index <- sample(c(1:nrow(cc)), nrow(cc)*0.6)
+cc_train.df <- cc[cc.index, ]
+cc_valid.df <- cc[-cc.index, ]
+```
+9. After converting all variables to factor type, I partitioned the data into training(60%) and validation(40%) sets.
+```{r}
+library(ggplot2)
+
+ggplot(cc_train.df, aes(x = Product, fill = Consumer.disputed)) +
+    geom_bar(position = 'fill') +
+  labs(x = "Product", y = "Proportion")
+
+ggplot(cc_train.df, aes(x = Issue, fill = Consumer.disputed)) +
+    geom_bar(position = 'fill') +
+  # coord_flip() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(x = "Issue", y = "Proportion")
+
+ggplot(cc_train.df, aes(x = State, fill = Consumer.disputed)) +
+    geom_bar(position = 'fill') +
+  labs(x = "State", y = "Proportion")
+
+ggplot(cc_train.df, aes(x = Submitted.via, fill = Consumer.disputed)) +
+    geom_bar(position = 'fill') +
+  labs(x = "Submitted.via", y = "Proportion")
+
+ggplot(cc_train.df, aes(x = Timely.response, fill = Consumer.disputed)) +
+    geom_bar(position = 'fill') +
+  labs(x = "Timely.response", y = "Proportion")
+
+ggplot(cc_train.df, aes(x = Year, fill = Consumer.disputed)) +
+    geom_bar(position = 'fill') +
+  labs(x = "Year", y = "Proportion")
+
+ggplot(cc_train.df, aes(x = Quarter, fill = Consumer.disputed)) +
+    geom_bar(position = 'fill') +
+  labs(x = "Quarter", y = "Proportion")
+
+ggplot(cc_train.df, aes(x = Resolution.time.in.days, fill = Consumer.disputed)) +
+    geom_bar(position = 'fill') +
+  labs(x = "Resolution.time.in.days", y = "Proportion")
+
+```
+10. a.For the Year variable, we observed a similar proportion between time periods and whether consumers disputed or not. The same applies to the Quarter variable, with only a small difference in the third quarter. Timely.response showed better result with noticeable differences between values compared to Resolution.time.in.days. For the remaining variables, we can see distinct differences between categories.
+b. I will remove Resolution.time.in.days, because of the imbalance of values in dataset.
+```{r}
+cc_train.df <- cc_train.df %>% select(-Year, -Quarter, -Resolution.time.in.days)
+str(cc_train.df)
+
+library(e1071)
+cc.nb <- naiveBayes(Consumer.disputed ~.,data = cc_train.df)
+cc.nb
+```
+```{r}
+str(cc_train.df)
+```
+
+```{r}
+confusionMatrix(predict(cc.nb, newdata=cc_train.df), cc_train.df$Consumer.disputed)
+
+confusionMatrix(predict(cc.nb, newdata=cc_valid.df), cc_valid.df$Consumer.disputed)
+```
+12. Comparing the accuracy metrics, the validation set achieved 74.45%, which is lower than the training set's 77.05%. However, both sets reveal that the model predominantly predicts 'No' for all instances (100%).
+a.The model predicts 'No' for every case and never predicts 'Yes', indicating an imbalance among predictions. Although the accuracy appears relatively high, it is misleading as it reflects the model's bias rather than its true predictive power.
+
+13. Naive rule in classification is to classify the record as a member of majority class. If we had used the naive rule for classification, we would classify all records in the training set as "No" because "No" is the most frequent class.
+a. Our Naive Bayes model, which follows the naive rule approach, assigns all cases as "No." Both methods yield the same accuracy of 77.05%, resulting in a 0% difference between them.
+b. I think imbalance plays a big role here. As described in the book, the absence of this predictor actively “outvotes” any other information in the record to assign a "No" to the outcome value (when, in this case, it has a relatively good chance of being a "Yes"). Also, as a customer, I often choose not to dispute issues to avoid wasting energy. It's usually easier to let things go rather than engage in disputes, especially if the potential outcome doesn't seem worth the effort. Maybe it's a reason why we don't have meaningful data.
+```{r}
+pred.prob <- predict(cc.nb, newdata=cc_valid.df, type="raw")
+# pred.prob
+
+pred.class <- predict(cc.nb, newdata=cc_valid.df)
+# pred.class
+
+df <- data.frame(actual=cc_valid.df$Consumer.disputed,
+                 predicted=pred.class, pred.prob)
+
+valid_25 <- df %>% arrange(desc(Yes)) %>% slice(1:25)
+
+table(valid_25$actual)
+valid_25 %>% filter(actual == 'Yes')
+```
+14. I took 25 records by sorting the probability for the "Yes" column in descending order, selecting the top 25 as the most likely to belong to the “YES” group. 
+a. Among these 25 records, 5 records truly belong to "Yes" group. The accuracy for these predictions = 80%. Even though the model didn’t predict any "Yes" values, it still achieved 80% accuracy by correctly classifying 20 out of 20 "No" records. Since the "Yes" group is a small portion of the dataset, its impact on accuracy is minimal. Compared to accuracy of overall model 74.45%, these selected proportion of data have reslatively high value.
+b. Identifying this subset of records helps us to see that the model completely fails at identifying "Yes" cases. On the other hand, by assigning all records to the majority class "No," the model achieves high accuracy, performing well in most cases. By identifying this main issue, we can focus on other ways to dealing with imbalanced data or try other models. 
+```{r}
+my_data <- cc_train.df[45,]
+
+predict(cc.nb, my_data)
+
+predict(cc.nb, my_data, type="raw")
+my_data
+
+cc.nb
+no_score <- 0.7704785 * 0.41947368 * 0.07526316 * 0.06526316 * 0.680526316 * 0.01684211
+yes_score <- 0.2295215 * 0.42756184 * 0.09893993 * 0.04416961 * 0.779151943 * 0.01060071
+
+no_score/(no_score + yes_score)
+```
+15. I selected 45th row from training set.
+a. Actual Consumer.disputed outcome is "No"
+b. The model's predicted answer is "No"
+c. The probability for "No" is 0.8370455, "Yes" is 0.1629545.
