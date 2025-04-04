@@ -1,0 +1,70 @@
+---
+title: "Association rules"
+output: html_notebook
+---
+```{r}
+library(tidyverse)
+library(dplyr)
+library(arules)
+library(arulesViz)
+
+data("Groceries")
+summary(Groceries)
+```
+Groceries is of class transactions (sparse matrix).
+The data consists of 9835 rows, and 169 columns.
+```{r}
+itemFrequencyPlot(Groceries, 
+                  support=0.0725, 
+                  horiz = TRUE, 
+                  col = "ivory",
+                  main = "Frequent Grocery items (Support > 7.25%)")
+```
+The bar plot above displays frequent items, that meet the support value. The minimum support threshold is set at 7.25%, meaning that only items appearing in at least 7.25% of all transactions are considered frequent. As a result we got 16 frequent products.
+```{r}
+rules <- apriori (Groceries, parameter = list(supp = 0.001, conf = 0.5))
+# summary(rules)
+# inspect(rules[1:5])
+# itemLabels(Groceries)
+lhs_rules <- subset(rules, lhs %in% "cream cheese ")
+rhs_rules <- subset(rules, rhs %in% "cream cheese ")
+
+summary(lhs_rules)
+summary(rhs_rules)
+```
+There is 233 rules that contain my product - cream cheese - on the left hand side. 59 rules involve three product subset, 137 four product subset, and 37 five product subset. And we get only 1 rule with cream cheese on right hand side, which is in the subset of five products. Indicating that cream cheese appears in combination with other products.
+```{r}
+inspect(sort(rhs_rules, by="lift"))
+```
+Let's look at the first rule: If a person buys other vegetables, curd, yogurt, and whipped/sour cream this person 14.83 times more likely to buy cream cheese than a random customer in store. 
+The support number is 0.001, meaning that 0.1% of all transactions studied had exact same item sets. 
+Confidence is 0.59 => If someone buys other vegetables, curd, yogurt, and whipped/sour cream, there’s a 59% chance that they also buy cream cheese.
+Coverage number gives an idea how often the rule can be applied, in this case it equals to 0.002. This rule applies to 0.2% of all transactions in the dataset.
+```{r}
+inspect(sort(lhs_rules, by="lift")[2])
+```
+The next rule: If a person buys citrus fruit, other vegetables, whole milk, and cream cheese he/she is 9.12 times more likely to buy domestic eggs than a random purchaser in store. 
+The support number is 0.001, this rule applies to only 0.1% of all transactions.
+This rule also have high confidence, saying that if customer buys citrus fruit, other vegetables, whole milk, and cream cheese, there is 58% chance they also buy domestic eggs. 
+Coverage number is 0.002, meaning that this combination occurs in 0.2% of all transactions.
+
+From these rules we see that certain sets of products are frequently purchased together. In combination they may be ingredients for salads, or other recipes. Cream cheese, in particular, is commonly used in baking and is a key ingredient in cheesecake. Despite that, cream cheese widely used for frosting, spreads, pasta sauces, dips, making it a versatile ingredient in a variety of dishes.
+
+
+By identifying frequent combinations with cream cheese, the store can strategically place those items nearby—such as positioning cream cheese close to the vegetables/fruits section or within the dairy aisle for convenient access.
+Also, offering special discounts can boost sales. For example, if a customer buys cream cheese, offering a discount on berries or bagels can encourage bundled purchases.
+Additionally, analyzing product pairs allows the store to anticipate demand and adjust inventory accordingly, ensuring high-demand combinations are well-stocked ahead of time, especially during peak shopping seasons.
+```{r}
+inspect(lhs_rules[7:9])
+plot(lhs_rules[7:9])
+```
+From the plot above, we observe the distribution of three association rules based on confidence (y-axis), support (x-axis), and lift (represented by color).
+First rule: {cream cheese , frozen meals} => {whole milk} has the highest confidence and lift values but a low support. This means the rule highly reliable: there is 71.43% chance that a customer who buys cream cheese and frozen meals will also buy whole milk. And the strength of the association is strong. However, it applies to 0.10% of the transactions.
+Second rule: {hard cheese, cream cheese } => {other vegetables} has a higher support and lift compared to the first rule, but its confidence is lower (57.9%). This suggests that while this combination of products occurs more frequently, it may not be as strong in predicting the purchase of vegetables when a customer buys both hard cheese and cream cheese.
+Third rule: {hard cheese, cream cheese } => {whole milk} has a similar support as a first rule, meaning that it applies to the same small proportion of transactions. However, it has lowest confidence and lift values, making it less reliable and significant to customer behaviour. This rule can demonstrate rare combination of items.
+```{r}
+plot(lhs_rules[7:9], method = "graph", engine="htmlwidget")
+```
+Now the plot shows the relationship between rules as a graph. The central node represents cream cheese, which appears in all three rules, indicating that it is a key item in these associations. Hard cheese and whole milk appear in two rules each, showing that these items are associated with more than one combination of products. Frozen meals and other vegetables only appear in one rule each, which indicates that they are more specific to particular product combinations. Also the color differentiation in the plot corresponds to the lift value of each rule. The rule 3, which has lowest lift value in represented in light red. Meanwhile, Rules 1 and 2 are highlighted in bold red, suggesting that they have higher lift values and stronger associations between the items.
+Compared to previous plot, this visual shows elements of rules, allowing to quickly identify the central elements, and the relative strength of the rules. This plot also displays measures of rules (confidence, support) if we click on rule node.
+However, if we want to select strong rule the scatter plot is more useful because it clearly shows rules with higher support and confidence in a more clearer way. Therefore, the choice of plot depends on the purpose.
