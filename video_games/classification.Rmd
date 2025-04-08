@@ -1,0 +1,158 @@
+---
+title: "Classification Tree"
+output: html_notebook
+---
+
+```{r}
+library(tidyverse)
+library(dplyr)
+library(caret)
+```
+
+```{r}
+vg <- read.csv('vgchartz-2024.csv')
+head(vg, 20)
+```
+2. This dataset appears to contain information about video games, including the title, the console it was developed for, genre, publisher, developer, game rating, various sales numbers, release date, and, if available, the last update date. While some titles appear multiple times, other variables indicate that these entries correspond to the same game released on different consoles or different versions, such as remakes. The critic_score represents the overall rating of a game, with a maximum score of 10. 
+And the dataset includes sales data across different regions (NA, JP, PAL, Other), and difference between numbers suggest the game popularity across various geographical areas. Furthermore, there is huge number of NAs.
+```{r}
+vg$total_sales <- cut(vg$total_sales, 
+                      breaks = quantile(vg$total_sales, probs = seq(0, 1, length.out = 4), na.rm = TRUE), 
+                      include.lowest = TRUE,
+                      labels = c("Low", "Medium", "High"))
+table(vg$total_sales)
+```
+3. After using equal frequency binning method to our output variable, we can see that the data equally was distributed within three groups: Low, Medium, High.
+```{r}
+str(vg)
+vg$img <- as.factor(vg$img)
+vg$title <- as.factor(vg$title)
+vg$console <- as.factor(vg$console)
+vg$genre <- as.factor(vg$genre)
+vg$publisher <- as.factor(vg$publisher)
+vg$developer <- as.factor(vg$developer)
+vg$release_date <- as.factor(vg$release_date)
+vg$last_update <- as.factor(vg$last_update)
+
+str(vg)
+```
+After converting all chr parameters to factor, our dataset contains only numbers or factors.
+```{r}
+top_7_Console <- vg %>% 
+  count(console, sort = TRUE) %>% 
+  slice(1:7)
+top_7_Console
+```
+5. a. 7 popular console types: PC, PS2, DS, PS4, PS, NS, XBL. Also there is huge difference between PC and other remaining values, making PC much more popular. This is likely due to its open system, allowing users to install and download games freely without strict platform restrictions.
+```{r}
+top_7_Genre <- vg %>% 
+  count(genre, sort = TRUE) %>% 
+  slice(1:7)
+top_7_Genre
+```
+b. 7 most common genres: misc, action, adventure, role-playing, sports, shooter, platform. The most prevalent genre is Miscellaneous, likely due to games that don’t fit into traditional categories or are poorly documented. Following that, Action games are the second most popular, with Adventure games ranking third. The popularity of platform games (Mario, Zelda or Sonic) shows that traditional gameplay styles still have a strong place in market. 
+```{r}
+top_7_Publisher <- vg %>% 
+  count(publisher, sort = TRUE) %>% 
+  slice(1:7) 
+top_7_Publisher
+```
+c. 7 most common publishers: unknown, sega, ubisoft, electronic arts, activision, konami, nintendo. Notably, 8,842 records lack publisher information, categorized under "Unknown." Among named publishers, Sega remains a key player. Also, Ubisoft, EA, Activision have released most of the popular games over the last few years.
+```{r}
+top_7_Developer <- vg %>% 
+  count(developer, sort = TRUE) %>% 
+  slice(1:7)
+top_7_Developer
+```
+d. 7 most common developers: unknown, konami, sega, namco, square enix, capcom, snk corporation. Similarly, 4,435 records lack developer information. Several major developers, such as Sega and Konami, also appear among the top publishers, reinforcing their influence in the industry.
+```{r}
+vg <- vg %>% filter(console %in% top_7_Console$console & 
+                      genre %in% top_7_Genre$genre &
+                      publisher %in% top_7_Publisher$publisher &
+                      developer %in% top_7_Developer$developer)
+
+nrow(vg)
+```
+After applying these filters, the dataset is reduced to 939 rows.
+
+```{r}
+vg <- droplevels(vg)
+nrow(vg)
+```
+7. The dataset contains 939 records.
+```{r}
+set.seed(79)
+vg.index <- sample(c(1:nrow(vg)), nrow(vg)*0.6)
+vg_train <- vg[vg.index, ]
+vg_valid <- vg[-vg.index, ]
+```
+
+```{r}
+library(rpart)
+library(rpart.plot)
+
+# names(vg)
+model <- rpart(total_sales ~ console + genre + publisher + developer + critic_score, method = 'class', data = vg_train)
+
+rpart.plot(model)
+```
+```{r}
+rpart.plot(model, extra=2, fallen.leaves = FALSE)
+```
+```{r}
+rpart.plot(model, type=5, extra = 2, fallen.leaves=FALSE)
+```
+10. The initial plot starts with default parameters, where the tree starts from console varaible at the root. Each node represents type of total_sales (Low, Medium, High) differentiated by color. Within each node, we see class probabilities and the percentage of observations classified at that node.
+After adding extra=2, in the new plot the class rate is relative to the total number of observations in each class. For instance, in the second left node, 50 observations belong to Low sales category out of 102 total observations. And setting fallen.leaves = FALSE, moves the leaf nodes away from the bottom, changing the structure of trees.
+In the third plot used type=5, which adds variable names for each split line, and class labels appear only at the leaves. This layout more intuitive, as it avoids overwhelming details such as numbers and labels.
+
+11. The root node is console variable, and rule is Console = DS or PC. The root node is starting point of model, and have highest impact on outcome variable. In our model, the type of console is primary factor to decide total sales number. So, this approach can help strategize future plans for the game publisher, focusing more on high-performance consoles. 
+
+12. We see that from 5 input variables (console, genre, publisher, developer, critic score), only 2 (console, genre) appears in the tree model, as a useful parameters to predict price. Variable subset selection is automatic since it is part of the split selection.
+
+```{r}
+rpart.rules(model)
+```
+13. From the rules of our model, let's describe second rule (index = 10):
+The video game is for PS console and Sports genre, by following tree nodes this game will be classified into Medium sales group.
+```{r}
+complex_model <- rpart(total_sales ~ console + genre + publisher + developer + critic_score, method="class", cp=0, minsplit=2, data = vg_train)
+
+rpart.plot(complex_model, extra=1, fallen.leaves=FALSE)
+```
+```{r}
+five_fold_cv <- rpart(total_sales ~ console + genre + publisher + developer + critic_score, method="class",
+                      cp=0.00001, minsplit=5, xval=5, data=vg_train)
+
+a <- printcp(five_fold_cv)
+a <- data.frame(a)
+a
+```
+15. From the complexity parameter table for eight trees, we see that xerror value decreased at some point and started to increase again. This minimum value of cross validation error (0.7037037) gives optimal cp value. In our case cp = 0.03703704
+```{r}
+pruned.ct <- prune(five_fold_cv,
+                   cp=five_fold_cv$cptable[which.min(five_fold_cv$cptable[,"xerror"]),"CP"])
+
+rpart.plot(pruned.ct,type=5, extra = 2, fallen.leaves=FALSE)
+```
+```{r}
+# Huge tree results
+complex_model.pred <- predict(complex_model, vg_train, type="class")
+confusionMatrix(complex_model.pred, vg_train$total_sales)
+
+complex_model.pred2 <- predict(complex_model, vg_valid, type="class")
+confusionMatrix(complex_model.pred2, vg_valid$total_sales)
+```
+18. a. The fully grown tree model have a high accuracy for training data (74.8%), but its performance drops significantly on the validation data (49.25%). This suggests that the model is overfitting, meaning it has learned the noise and specific patterns of the training set that do not generalize well to new, unseen data.
+```{r}
+# Pruned tree results
+pruned.ct.pred <- predict(pruned.ct, vg_train, type="class")
+confusionMatrix(pruned.ct.pred, vg_train$total_sales)
+
+pruned.ct.pred2 <- predict(pruned.ct, vg_valid, type="class")
+confusionMatrix(pruned.ct.pred2, vg_valid$total_sales)
+```
+18. b. In comparison the pruned tree shows lower accuracy on both the training set (61.42%) and the validation set (41.79%). While the overall accuracy is lower, the smaller performance gap between training and validation data indicates that the pruned tree generalizes better and is less prone to overfitting.
+Although the huge tree model appears to perform better in terms of accuracy. Therefore, the pruned model is more reliable for making predictions on new data, even if it comes at the cost of slightly lower accuracy.
+When working with the model that has more than two outcome parameters, the accuracy not always enough to evaluate performance. More variables, more chance the model predict wrong class, and baseline accuracy also drops down, making a high accuracy harder to achieve.
+c. When using a pruned tree, the difference between training and validation accuracy decreases because pruning reduces overfitting. By removing unnecessary splits, the model captures meaningful patterns rather than noise. As a result the training accuracy decreases, but validation accuracy remains more stable making the model more reliable to new data.
