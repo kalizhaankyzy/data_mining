@@ -1,0 +1,172 @@
+---
+title: "Pokemon - Hierarchical Clustering"
+format: html
+editor: visual
+---
+
+```{r}
+library(tidyverse)
+library(dplyr)
+library(caret)
+library(ggplot2)
+library(ggdendro)
+```
+
+```{r}
+pokemon <- read.csv('all_pokemon_data.csv')
+head(pokemon)
+```
+
+```{r}
+dim(pokemon)
+```
+
+Dataset consists of 1184 rows and 24 columns.
+
+```{r}
+set.seed(79)
+random_sample <- pokemon[sample(nrow(pokemon), 20), ]
+
+sum(is.na(random_sample))
+```
+
+There is no NA values in random chosen sample.
+
+```{r}
+head(random_sample, 5)
+
+summary(random_sample)
+```
+
+Categorical: National.Dex, Evolution.Stage\
+Numerical: Number.of.Evolution, Catch Rate, Height..dm., Weight..hg., Height..in., Weight..lbs., Base.Stat.Total, Health, Attack, Defense, Special Attack, Special Defense, Speed
+
+```{r}
+rand_sp_numeric <- random_sample %>%
+  select (Name, Catch.Rate, Special.Defense, Special.Attack, Speed, Health)
+rownames(rand_sp_numeric) <- rand_sp_numeric$Name
+
+rand_sp_numeric
+rand_sp_numeric <- rand_sp_numeric %>% select(-Name)
+```
+
+Performance indicators can be good options for clustering. Since Base Stat Total already covers other stats, keeping it can cause multicolinerity between variables. Therefore, I excluded Base Stat Total and instead selected a focused set of variables: Speed, Catch Rate, Health, Special Attack, Special Defense. I want to cluster pokemons based on magic-based powerhouses, because of that I chose Special variables. Speed, health, and catch rate help show how fast, tough, or easy to catch a Pokémon is—things that also reflect their overall performance.
+
+```{r}
+summary(rand_sp_numeric)
+head(rand_sp_numeric)
+```
+
+The data needs to be normalized because each column has a different range of values. This makes sure that all variables have equal weight in clustering. Otherwise, the column with higher magnitude - Catch Rate will have higher influence.
+
+```{r}
+norm <- preProcess(rand_sp_numeric, method = c("center", "scale"))
+random_sample_norm <- predict(norm, rand_sp_numeric)
+random_sample_norm
+```
+
+```{r}
+d.norm <- dist(random_sample_norm, method="euclidean")
+# d.norm
+
+hc <- hclust(d.norm, method="average")
+ggdendrogram(hc) 
+
+ggdendrogram(hc) + 
+  geom_hline(yintercept = 3, color = "red", linetype = "dashed")
+```
+
+The number of clusters can vary depending on how we interpret the data. If we look for very distinct groups, we can see that the leftmost cluster is clearly separate from the others. Let's draw a line with cut point=3, and group characters based on that. As a result we get 5 groups: {ralts}, {stonjourner}, {minior-violet and wugtrio}, {wigglytuff}, {others}.
+
+```{r}
+clusters <- cutree(hc, k = 5)
+clusters
+```
+
+```{r}
+rand_sp_numeric$cluster <- clusters
+
+cluster_mean <- rand_sp_numeric %>% group_by(cluster) %>% 
+  summarise_all(mean)
+cluster_mean
+```
+
+After calculating mean values of each cluster, we see that: Cluster 1: high special defense; moderate speed, special attack and health; low catch rate. This cluster seems to group defensive Pokemon that are less focused on catching. Cluster 2: highest speed, lowest catch rate, remaining variables are moderate. This cluster groups fastest Pokemon that are harder to catch, possibly indicating Pokemon with high mobility. Cluster 3: highest catch rate, while remaining values are low. Seems like this cluster have only one Pokemon, since catch rate is extremely high, which indicates Pokemon that's easy to catch but weak in battle. Cluster 4: lowest special defense and attack, health parameter is relatively high and others are moderate. This cluster group Pokemon with high survivability but with low offensive capabilities. Cluster 5: highest special attack and health values, and others moderate. This cluster groups powerful special attackers with strong survival level.
+
+```{r}
+rand_sp_numeric$cluster <- factor(rand_sp_numeric$cluster)
+
+ggplot(rand_sp_numeric, aes(x=Speed, y=Catch.Rate, color=cluster)) +
+  geom_point()
+```
+
+The scatter plot above shows relationship between Speed and Catch Rate across clusters. We can see one Pokemon in Cluster 3 with the highest Catch rate. Although there are two members in CLuster 2 with the highest Speed values.
+
+```{r}
+ggplot(rand_sp_numeric, aes(x=Special.Attack, y=Health, color=cluster)) +
+  geom_point()
+```
+
+The scatter plot shows the relationship between Health and Special Attack across clusters. We can see that Cluster 1 members have average health and higher special attack, Cluster 4 have one member with lowest special attack and moderate health value. CLuster 5 groups Pokemon with high health and special attack, and Cluster 3 contains Pokemon with lowest health and moderate attack, likely focusing more on offense. Although, Cluster 2 consists of two Pokemon: one with lowest health and moderate attack, another with high attack and moderate health.
+
+```{r}
+ggplot(rand_sp_numeric, aes(x=cluster, y=Speed)) +
+  geom_boxplot()
+```
+
+The boxplot above shows distribution of Speed values across clusters. Cluster 1 has a large number of Pokemon, with a broader range of Speed values, while other clusters contains only 1 or 2 Pokemon. When comparing the median Speed values, Cluster 2 has the highest median Speed, indicating that these Pokemon are the fastest. Clusters 3 and 4 have lower median Speed values, meaning that these are slowest ones.
+
+```{r}
+rand_sp_numeric[5,]
+
+rand_sp_numeric %>% filter(cluster==2)
+```
+
+The Pokemon Minior-violet falls into Cluster 2, group of fastest Pokemon. This cluster contains two Pokemon, both having the similar highest Speed value, making it the key feature in Cluster 2. They also have relatively close special defense values. Although there are large differences in Special Attack and Health, these seem to have less impact compared to their shared high Speed.
+
+<!-- -->
+
+Equal weighting can be problematic if some parameters are more important than others. If we want the clustering to depend more on certain variables and less on others, giving all features the same weight might not reflect what we’re really trying to group. For example, in this case, I’m more interested in clustering based on special or magical attributes, so those variables should carry more influence.
+
+```{r}
+random_sample.weighted <- random_sample_norm
+
+random_sample.weighted$Special.Attack <- random_sample.weighted$Special.Attack*30
+random_sample.weighted$Special.Defense <- random_sample.weighted$Special.Defense*25
+random_sample.weighted$Speed <- random_sample.weighted$Speed*20
+random_sample.weighted$Health <- random_sample.weighted$Health*10
+random_sample.weighted$Catch.Rate <- random_sample.weighted$Catch.Rate*5
+```
+
+Since I want to cluster based on special, magic-based parameters, I assigned weights to the variables accordingly: Special attack is the most important, so it gets a weight of 30. Special defense supports magical resistance, and gets a weight of 25. Speed is useful for overall performance, so I gave it a weight of 20. Health is still important, just less critical here, with a weight of 10. Catch rate has the least impact on magical strength, so it gets a weight of 5.
+
+```{r}
+d.norm2 <- dist(random_sample.weighted, method="euclidean")
+
+hc2 <- hclust(d.norm2, method="average")
+ggdendrogram(hc2)
+```
+
+In new dendrogram, the y-axis now ranges from 0 to 75, compared to the previous range of 0 to 4. This shows a wider range of dissimilarity within clusters. Also, there are no singletons in this version — all items are connected to small groups. The way the items cluster together, and the distances at which these groupings happen, are also noticeably different compared to the unweighted version. For instance, before applying weight Pokemon Ralts didn’t belong to any clear group — it was directly connected to all the remaining ones. After applying the weights, Ralts is now grouped with Stonjourner, and together they are then connected to the rest.
+
+```{r}
+clusters2 <- cutree(hc2, k = 4)
+clusters2
+```
+
+```{r}
+rand_sp_numeric$cluster <- clusters2
+
+rand_sp_numeric %>% group_by(cluster) %>% 
+  summarise_all(mean)
+```
+
+After grouping Pokemon into 4 groups, some patterns emerge: Cluster 1: high Health, with other parameters moderate. This group includes Pokemon that are built to last longer in battle, but with less focus on offensive power. Cluster 2: highest special defense, attack, and health, with the lowest catch rate. These are powerful, magic-based Pokemon that are hard to catch — fitting for their strong battle stats. Cluster 3: highest special attack and speed, but low health value. These are fast, offensive Pokemon — strong in attack but fragile in battle. Cluster 4: highest catch rate, with other values low. These are easiest to catch, and tend to be less competitive in battle.
+
+```{r}
+rand_sp_numeric[5,]
+
+rand_sp_numeric %>% filter(cluster==3)
+```
+
+After weighting, Minior-violet was moved to Cluster 3, which also contains two Pokemon. The other member of this cluster has the same Special Attack value, similar Health, and both share a high Speed value. Before weighting, Minior-violet was placed in Cluster 2, where its highest Speed value was the key feature driving the grouping. After weighting, special attack and defense were given more importance. This made Minior-violet more similar to Masquerain, which shares those characteristics of high Special Attack and Speed, even though both Pokémon have relatively low Health.
